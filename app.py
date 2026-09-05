@@ -13,25 +13,31 @@ uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
+    
+    # Safe limit to avoid server throttling on cloud
+    max_dimension = 1500
+    if max(image.size) > max_dimension:
+        image.thumbnail((max_dimension, max_dimension))
+        st.warning(f"⚠️ Image was too large, auto-resized to fit safe server limits (Max: {max_dimension}px).")
+
     orig_width, orig_height = image.size
     orig_size_kb = uploaded_file.size / 1024
     orig_size_str = f"{orig_size_kb:.2f} KB" if orig_size_kb < 1024 else f"{orig_size_kb/1024:.2f} MB"
 
     st.markdown("---")
-    # Slider moved to main screen right above the images
     st.subheader("⚙️ Dynamic Controls")
+    # Default value set to 2.5 (near max enhancement) as requested
     enhancement_power = st.slider(
         "⬅️ Less Enhance | More Enhance ➡️",
         min_value=1.0,
         max_value=3.0,
-        value=1.5,
+        value=2.5,
         step=0.1,
         help="Left side mein kam enhancement aur right side mein maximum enhancement hogi."
     )
     st.markdown("---")
 
-    # Scale factor based on slider position
-    scale_factor = 2 if enhancement_power < 2.0 else 4
+    scale_factor = 2  # Fixed safe 2x scaling for smooth web performance
 
     col1, col2 = st.columns(2)
     with col1:
@@ -39,44 +45,38 @@ if uploaded_file is not None:
         st.image(image, use_container_width=True)
         st.caption(f"📏 Resolution: {orig_width} x {orig_height} px\n💾 Size: {orig_size_str}")
 
-    # Real-time processing based on slider movement
+    # Real-time processing optimized for web
     with st.spinner("Processing image..."):
-        # Convert PIL to OpenCV format
         img_cv = np.array(image)
-        if img_cv.ndim == 2:  # Grayscale
+        if img_cv.ndim == 2:
             img_cv = cv2.cvtColor(img_cv, cv2.COLOR_GRAY2BGR)
-        elif img_cv.shape[2] == 4:  # RGBA
+        elif img_cv.shape[2] == 4:
             img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGBA2BGR)
         else:
             img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
 
-        # Dynamic resizing
         height, width = img_cv.shape[:2]
         new_width = width * scale_factor
         new_height = height * scale_factor
         
-        upscaled_cv = cv2.resize(img_cv, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+        upscaled_cv = cv2.resize(img_cv, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
-        # Sharpening filter proportional to slider value
         kernel = np.array([[0, -1, 0],
-                           [-1, 4 + (enhancement_power * 0.5), -1],
+                           [-1, 4 + (enhancement_power * 0.3), -1],
                            [0, -1, 0]])
         sharpened_cv = cv2.filter2D(upscaled_cv, -1, kernel)
 
-        # Convert back to RGB for PIL
         sharpened_rgb = cv2.cvtColor(sharpened_cv, cv2.COLOR_BGR2RGB)
         result_image = Image.fromarray(sharpened_rgb)
 
-        # Apply enhancements based on slider position
         sharp_enhancer = ImageEnhance.Sharpness(result_image)
         result_image = sharp_enhancer.enhance(enhancement_power)
 
         contrast_enhancer = ImageEnhance.Contrast(result_image)
-        result_image = contrast_enhancer.enhance(1.0 + (enhancement_power * 0.1))
+        result_image = contrast_enhancer.enhance(1.0 + (enhancement_power * 0.05))
 
-    # Save to bytes for size calculation and download
     buf = BytesIO()
-    result_image.save(buf, format="PNG")
+    result_image.save(buf, format="PNG", optimize=True)
     byte_im = buf.getvalue()
     res_width, res_height = result_image.size
     res_size_kb = len(byte_im) / 1024
@@ -87,7 +87,7 @@ if uploaded_file is not None:
         st.image(result_image, use_container_width=True)
         st.caption(f"📏 Resolution: {res_width} x {res_height} px\n💾 Size: {res_size_str}")
 
-    st.success("Image updated live based on slider position!")
+    st.success("Image updated live successfully!")
     
     st.download_button(
         label="Download Enhanced Image",
